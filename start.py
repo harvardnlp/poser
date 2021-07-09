@@ -110,8 +110,9 @@ class Problem:
         outer = []
         for i in range(points.shape[1]):
             outer_for_i = []
+            inpoly = parallelpointinpolygon(points[:, i].detach().numpy(), self.poly_np)
             for r in range(points.shape[0]):
-                if self.poly.oriented_side(sg.Point2(points[r, i, 0], points[r, i, 1])) == sg.Sign.NEGATIVE:
+                if not inpoly[r]:
                     outer_for_i.append(i)
                     if len(outer_for_i) > 10:
                         break
