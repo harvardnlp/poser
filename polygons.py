@@ -35,28 +35,34 @@ import torch
 
 def perp(a) :
     b = torch.empty_like(a)
-    b[0] = -a[1]
-    b[1] = a[0]
+    b[...,0] = -a[...,1]
+    b[...,1] = a[...,0]
     return b
 
 # line segment a given by endpoints a1, a2
 # line segment b given by endpoints b1, b2
 # return 
-def seg_intersect(a, b):
-    a = a.view(-1, 1, 2)
-    b = b.view(1, -1, 2)
-    da = a[:, :, 1]-a[:, :, 0]
-    db = b[:, :, 1]-b[:, :, 0]
-    dp = a[:, :, 0]-b[:, :, 0]
+def seg_intersect(a1, a2, b1, b2):
+    a1 = a1.view(-1, 1, 2)
+    a2 = a2.view(-1, 1, 2)
+    b1 = b1.view(1, -1, 2)
+    b2 = b2.view(1, -1, 2)
+    
+    da = a2 - a1
+    db = b2 - b1
+    dp = a1 - b1
     dap = perp(da)
     denom = torch.einsum("abd,abd-> ab", dap, db)
     num = torch.einsum("abd,abd-> ab", dap, dp)
-    return (num / denom.float()) + b[:, :, 0]
+    return denom != 0
+    # print(num, denom)
+    # return (num / denom.float()) + b1
 
-p1 = array( [0.0, 0.0] )
-p2 = array( [1.0, 0.0] )
 
-p3 = array( [4.0, -5.0] )
-p4 = array( [4.0, 2.0] )
+p1 = torch.tensor( [[0.0, 4.0]] )
+p2 = torch.tensor( [[1.0, 4.0]] )
 
-print seg_intersect( p1,p2, p3,p4)
+p3 = torch.tensor( [[1.5, 5.0]] )
+p4 = torch.tensor( [[2.0, 5.0]] )
+
+print(seg_intersect( p1,p2, p3,p4))
