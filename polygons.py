@@ -33,36 +33,48 @@ def parallelpointinpolygon(points, polygon):
 
 import torch
 
-def perp(a) :
-    b = torch.empty_like(a)
-    b[...,0] = -a[...,1]
-    b[...,1] = a[...,0]
-    return b
+# def perp(a) :
+#     b = torch.empty_like(a)
+#     b[...,0] = -a[...,1]
+#     b[...,1] = a[...,0]
+#     return b
 
-# line segment a given by endpoints a1, a2
-# line segment b given by endpoints b1, b2
-# return 
-def seg_intersect(a1, a2, b1, b2):
-    a1 = a1.view(-1, 1, 2)
-    a2 = a2.view(-1, 1, 2)
-    b1 = b1.view(1, -1, 2)
-    b2 = b2.view(1, -1, 2)
+# # line segment a given by endpoints a1, a2
+# # line segment b given by endpoints b1, b2
+# # return 
+# def seg_intersect(a1, a2, b1, b2):
+#     a1 = a1.view(-1, 1, 2)
+#     a2 = a2.view(-1, 1, 2)
+#     b1 = b1.view(1, -1, 2)
+#     b2 = b2.view(1, -1, 2)
     
-    da = a2 - a1
-    db = b2 - b1
-    dp = a1 - b1
-    dap = perp(da)
-    denom = torch.einsum("abd,abd-> ab", dap, db)
-    num = torch.einsum("abd,abd-> ab", dap, dp)
-    return denom != 0
-    # print(num, denom)
-    # return (num / denom.float()) + b1
+#     da = a2 - a1
+#     db = b2 - b1
+#     dp = a1 - b1
+#     dap = perp(da)
+#     denom = torch.einsum("abd,abd-> ab", dap, db)
+#     num = torch.einsum("abd,abd-> ab", dap, dp)
+#     print(num, denom)
+#     # return denom != 0.0
 
+#     return (num / denom.float())[..., None] * db + b1
 
-p1 = torch.tensor( [[0.0, 4.0]] )
-p2 = torch.tensor( [[1.0, 4.0]] )
+def ccw(A,B,C):
+    return (C[...,1] - A[...,1]) * (B[...,0]-A[...,0]) > (B[...,1]-A[...,1]) * (C[...,0]-A[...,0])
 
-p3 = torch.tensor( [[1.5, 5.0]] )
-p4 = torch.tensor( [[2.0, 5.0]] )
+# Return true if line segments AB and CD intersect
+def seg_intersect(A,B,C,D):
+    A = A.view(-1, 1, 2)
+    B = B.view(-1, 1, 2)
+    C = C.view(1, -1, 2)
+    D = D.view(1, -1, 2)
+    
+    return (ccw(A,C,D) != ccw(B,C,D)) & (ccw(A,B,C) != ccw(A,B,D))
+
+p1 = torch.tensor( [[0.0, -4.0], [1.0, 4.0]] )
+p2 = torch.tensor( [[0.0, 5.0], [1.0, 4.0]] )
+
+p3 = torch.tensor( [[-1.0, 1.6], [1.0, 3.0]] )
+p4 = torch.tensor( [[2.0, 1.6], [1.0, 5.0]] )
 
 print(seg_intersect( p1,p2, p3,p4))

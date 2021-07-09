@@ -9,7 +9,7 @@ import numpy as np
 import torch
 # __st.set_option('deprecation.showPyplotGlobalUse', False)
 from polygons import *
-
+import polygons
 def dist(u, v):
     d = u - v
     return (d * d).sum(-1)
@@ -45,17 +45,31 @@ class Problem:
 
     def find_intersections(self, p):
         bad_edges = []
+        s = self.holepts.shape[0]
         inpoly = parallelpointinpolygon(p.detach().numpy(), self.poly_np)
-        vertices = [sg.Point2(a[0], a[1]) for a in p.detach().numpy()]
-        edge_segments = [(vertices[fro], vertices[to])
-                         for (fro, to) in self.graph
+        # vertices = [sg.Point2(a[0], a[1]) for a in p.detach().numpy()]
+        p = p.detach()
+        edge_segments = [(i, p[fro], p[to])
+                         for i, (fro, to) in enumerate(self.graph)
                          if inpoly[fro] and inpoly[to]]
-        edge_segments = [sg.Segment2(*e) for e in edge_segments]
-        for i, edge_segment in enumerate(edge_segments):
-            for edge in self.poly.edges:
-                if sg.intersection(edge, edge_segment):
-                    bad_edges.append(i)
-                    break
+        # edge_segments = [sg.Segment2(*e) for e in edge_segments]
+
+        a1 = torch.tensor([[v[1][0], v[1][1]] for v in edge_segments])
+        a2 = torch.tensor([[v[2][0], v[2][1]] for v in edge_segments])
+        b1 = torch.tensor(self.holepts[:])
+        b2 = torch.tensor(self.holepts[list(range(1, s)) + [0]])
+
+
+        n = seg_intersect(a1, a2, b1, b2)
+        bad = n.any(dim=1)
+        for i in range(bad.shape[0]):
+            if bad[i]:
+                bad_edges.append(edge_segments[i][0])
+        # for i, edge_segment in enumerate(edge_segments):
+        #     for edge in self.poly.edges:
+        #         if sg.intersection(edge, edge_segment):
+        #             bad_edges.append(i)
+        #             break
         return bad_edges
 
     def seg_dist(self, p):
