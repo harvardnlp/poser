@@ -59,7 +59,6 @@ class Problem:
         b1 = torch.tensor(self.holepts[:])
         b2 = torch.tensor(self.holepts[list(range(1, s)) + [0]])
 
-
         n = seg_intersect(a1, a2, b1, b2)
         bad = n.any(dim=1)
         for i in range(bad.shape[0]):
