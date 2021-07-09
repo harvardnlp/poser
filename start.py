@@ -60,6 +60,7 @@ class Problem:
         b2 = torch.tensor(self.holepts[list(range(1, s)) + [0]])
 
         n = seg_intersect(a1, a2, b1, b2)
+
         bad = n.any(dim=1)
         for i in range(bad.shape[0]):
             if bad[i]:
@@ -166,7 +167,7 @@ class Problem:
             opt.zero_grad()
             spring_cons = self.spring_constraint(parameters).mean()
             st_cons = self.stretch_constraint(parameters).sum()
-            outside_cons, _, _ = self.outside_constraint(parameters)
+            outside_cons, _, out_points = self.outside_constraint(parameters)
             random_cons, intersections, outer = self.random_constraint(parameters)
             inside_cons, _, _ = self.inside_constraint(parameters)
             inside_cons = inside_cons.clamp(max=12)
@@ -189,8 +190,8 @@ class Problem:
                 parameters.data[noroundies] -=  decay * torch.sign(parameters.data[noroundies] - parameters.data[noroundies].round())
 
             p = parameters.detach().round().float()
-            if self.stretch_constraint(p).sum().item() == 0.0 and self.outside_constraint(p)[0].sum().item() == 0.0:
-                _, intersections, _ = self.random_constraint(parameters)
+            if self.stretch_constraint(p).sum().item() == 0.0 and self.outside_constraint(p)[0].sum().item() == 0.0 and out_points.sum() == 0:
+                _, intersections, _ = self.random_constraint(p)
                 if len(intersections) == 0:
                     print("success!")
                     print({"vertices" : [[int(t[0].item()), int(t[1].item())] for t in p]})
@@ -203,6 +204,7 @@ class Problem:
                      "loss": loss.detach().item(),
                      "spring" : spring_cons.detach().item(),
                      "intersections" : intersections,
+                     "out_points" : out_points.sum(),
                      "stretch" : st_cons.detach().item(),
                      "outside" : outside_cons.sum().detach().item(),
                      "int cons" : int_cons.item(),
@@ -213,7 +215,7 @@ class Problem:
                 print(d)
         return None
 
-for problem_number in range(2, 3):
+for problem_number in range(3, 4):
     problem = Problem(problem_number)
     # result = problem.solve(torch.rand(*problem.original.shape), debug = True)
     result = problem.solve(problem.original, debug = True)

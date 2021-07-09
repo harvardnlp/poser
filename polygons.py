@@ -12,24 +12,34 @@ def pointinpolygon(x,y,poly):
     p1x,p1y = poly[0]
     for i in numba.prange(n+1):
         p2x,p2y = poly[i % n]
-        if y > min(p1y,p2y):
+        if y >= min(p1y,p2y):
             if y <= max(p1y,p2y):
                 if x <= max(p1x,p2x):
                     if p1y != p2y:
                         xints = (y-p1y)*(p2x-p1x)/(p2y-p1y)+p1x
-                    if p1x == p2x or x <= xints:
+                    if p1x == p2x or x < xints:
                         inside = not inside
         p1x,p1y = p2x,p2y
 
     return inside
+from matplotlib.path import Path
+p = Path([[0, 0], [1, 0], [1, 1], [0, 1.0]])
+grid = p.contains_points(np.array([[0.9, -0.01]]), radius=0.0001)
+print(grid)
+# print(pointinpolygon(0.9, 0.0, np.array([[0, 0], [1, 0], [1, 1], [0, 1.0]])))
+# print(pointinpolygon(0.9, 1.0, np.array([[0, 0], [1, 0], [1, 1], [0, 1.0]])))
+# print(pointinpolygon(1.0, 0.0, np.array([[0, 0], [1, 0], [1, 1], [0, 1.0]])))
+# print(pointinpolygon(0.0, 0.0, np.array([[0, 0], [1, 0], [1, 1], [0, 1.0]])))
 
-
-@njit(parallel=True)
+# @njit(parallel=True)
 def parallelpointinpolygon(points, polygon):
-    D = np.empty(len(points), dtype=numba.boolean) 
-    for i in numba.prange(0, len(D)):
-        D[i] = pointinpolygon(points[i,0], points[i,1], polygon)
-    return D
+    p = Path(polygon)
+    return p.contains_points(points, radius=0.001)
+
+    # D = np.empty(len(points), dtype=numba.boolean) 
+    # for i in numba.prange(0, len(D)):
+    #     D[i] = pointinpolygon(points[i,0], points[i,1], polygon)
+    # return D
 
 import torch
 
