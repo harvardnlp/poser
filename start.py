@@ -55,7 +55,13 @@ class Params:
 class Problem:
     def __init__(self, problem_number):
         self.problem_number = problem_number
-        poses = json.load(open("p%d.json"%problem_number))
+
+
+        filename = "p%d.json"%problem_number
+        if not os.path.exists(filename):
+            os.system(f"wget https://poses.live/problems/{problem_number}/download -O p{problem_number}.json")
+        poses = json.load(open(filename))
+
         self.epsilon = poses["epsilon"]
         self.figure = poses["figure"]
         self.graph = np.array(self.figure["edges"])
@@ -248,7 +254,7 @@ class Problem:
         best_parameters = None
         best_dislike = float('inf')
 
-        total_epochs = 4000
+        total_epochs = 8000
         for epochs in range(total_epochs):
             parameters = parameter_struct.get_parameters()
 
@@ -345,13 +351,53 @@ class Problem:
 
           def proposal(p, state):
             p = p.data.clone()
+
             state = state % p.shape[0]
-            new_pos_delta_possible = [[-1, 0], [1, 0], [0, -1], [0, 1],
-                                      [1, 1], [1, -1], [-1, 1], [-1, -1]]
-            new_pos_delta = random.choice(new_pos_delta_possible)
-            p[state, 0] += new_pos_delta[0]
-            p[state, 1] += new_pos_delta[1]
-            return p, state+1
+
+            action = random.choices(
+                ["vertex_translate", "global_translate", "global_rotate"],
+                weights = [8, 1, 1],
+            )[0]
+
+            if action == "vertex_translate":
+                # perturb one vertex
+                local = True
+                new_pos_delta_possible = [[-1, 0], [1, 0], [0, -1], [0, 1], [1, 1], [1, -1], [-1, 1], [-1, -1]]
+                new_pos_delta = random.choice(new_pos_delta_possible)
+
+                p[state, 0] += new_pos_delta[0]
+                p[state, 1] += new_pos_delta[1]
+
+                state = state + 1
+
+            elif action == "global_translate":
+                # perturb global
+                local = False
+                new_pos_delta_possible = [[-1, 0], [1, 0], [0, -1], [0, 1], [1, 1], [1, -1], [-1, 1], [-1, -1]]
+                new_pos_delta = random.choice(new_pos_delta_possible)
+
+                p[:, 0] += new_pos_delta[0]
+                p[:, 1] += new_pos_delta[1]
+
+            elif action == "global_rotate":
+                # rotate global
+                local = False
+                angle = random.choice([45, 90, 135, 180, 225, 270, 315])
+                s = math.sin(angle)
+                c = math.cos(angle)
+
+                # rotate every point angle degrees around center
+                center = p[state]
+
+                p_centered = p - center
+                p[:,0] = c * p_centered[:,0] - s * p_centered[:,0] + center[0] 
+                p[:,1] = c * p_centered[:,1] + s * p_centered[:,1] + center[1]
+                p = p.round()
+            else:
+                raise ValueError(f"Wrong action {action}")
+
+            return p, state, local 
+
 
           def energy_state(p):              
               inpoly = parallelpointinpolygon(p.detach().numpy(), self.poly_path)
@@ -366,33 +412,15 @@ class Problem:
                     
                     "outside" : cache["outside"].clone(),
                     "dislike" : self.dislikes(self.holepts, p)}
-              # start = time.time()
               d["stretch"] = self.stretch_constraint(p)
-              # end = time.time()
-              # print("a", end-start)
-              # start = time.time()
-              # d["dislike"] -= self.dislikes(self.holepts, p_old[state:state+1])
-              # d["dislike"] += self.dislikes(self.holepts, p[state:state+1])
-              # end = time.time()
-              # print("b", end-start)
-              # start = time.time()
               d["inpoly"][state:state+1] = parallelpointinpolygon(p[state:state+1], self.poly_path)
               new, old = self.find_intersections_dyn(p, d["inpoly"], state)
               d["intersections"] = set(cache["intersections"]) - set(old) | set(new)
-              # end = time.time()
-              # print("c", end-start)
-              # start = time.time()
               d["outside"] = self.outside_constraint(p, d["inpoly"])[0]
-              # end = time.time()
-              # print("d", end-start)
               
               return d
           
           def energy(p, p_old=None, cache=None, state=None):
-            # stretch = self.stretch_constraint(p).sum().item()
-            # outside = self.outside_consrtaint(p)[0].sum().item()
-            # dislike = self.dislikes(self.holepts, p)
-            # intersections = self.find_intersections(p)
           
             if cache is None:
                 state_cache = energy_state(p)
@@ -434,8 +462,8 @@ class Problem:
               
             for _ in range(p.shape[0]):
               t = temperature(epoch*p.shape[0], epochs*p.shape[0])
-              p_sa_prop, state = proposal(p_sa, state)              
-              E_prop, E_cache_prop = energy(p_sa_prop, p_sa, E_cache, state - 1)
+              p_sa_prop, state, local = proposal(p_sa, state)              
+              E_prop, E_cache_prop = energy(p_sa_prop, p_sa, E_cache if local else None, state - 1)
               #print ((E - E_prop) / max(t, eps))
               acceptance_ratio = math.exp(min(0, (E - E_prop) / max(t, eps)))
               total += 1
