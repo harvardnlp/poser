@@ -1,4 +1,3 @@
-
 # ICFP Contest
 import pandas as pd
 import skgeom as sg
@@ -158,7 +157,8 @@ class Problem:
         best_parameters = None
         best_dislike = float('inf')
 
-        for epochs in range(40000):
+        total_epochs = 4000
+        for epochs in range(total_epochs):
             #if best_parameters is not None and epochs >= 8000:
             #  break
             if debug and ((epochs % 1000) == 0 or epochs == 999 or success):
@@ -231,6 +231,81 @@ class Problem:
                      # "int con" : int_cons.detach().item()
                 }
                 print(d)
+        if mcmc:
+          # simulated annealing
+          import math
+          import random
+          min_dislike = float('inf')
+          best_ps = None
+
+          eps = 1e-4
+          def temperature(e, es):
+            T = 1
+            return T * (1 - e / es)
+
+          def proposal(p, state):
+            p = p.data.clone()
+            state = state % p.shape[0]
+            new_pos_delta_possible = [[-1, 0], [1, 0], [0, -1], [0, 1], [1, 1], [1, -1], [-1, 1], [-1, -1]]
+            new_pos_delta = random.choice(new_pos_delta_possible)
+            p[state, 0] += new_pos_delta[0]
+            p[state, 1] += new_pos_delta[1]
+            return p, state+1
+
+          def energy(p):
+            stretch = self.stretch_constraint(p).sum().item()
+            outside = self.outside_constraint(p)[0].sum().item()
+            dislike = self.dislikes(self.holepts, p)
+            intersections = self.find_intersections(p)
+            E = stretch * 10 + outside * 10 + dislike/100 + len(intersections) * 100
+            return E
+
+          if best_parameters is None:
+            best_parameters = p
+          p_sa = best_parameters.data.clone()
+          E = energy(p_sa)
+          print (E)
+          print ({"round stretch": self.stretch_constraint(p_sa).sum().item(),
+          "round outside": self.outside_constraint(p_sa)[0].sum().item(),
+          "intersections": len(self.find_intersections(p_sa)),
+          "dislike": self.dislikes(self.holepts, p_sa)})
+          epochs = 8000
+          state = 0
+          accepted = 0
+          total = 0
+          for epoch in range(epochs):
+            for _ in range(p.shape[0]):
+              t = temperature(epoch*p.shape[0], epochs*p.shape[0])
+              p_sa_prop, state = proposal(p_sa, state)
+              E_prop = energy(p_sa_prop)
+              #print ((E - E_prop) / max(t, eps))
+              acceptance_ratio = math.exp(min(0, (E - E_prop) / max(t, eps)))
+              total += 1
+              if random.random() < acceptance_ratio:
+                #assert E > E_prop
+                #print (p_sa_prop - p_sa, E, E_prop, acceptance_ratio)
+                accepted += 1
+                p_sa = p_sa_prop
+                E = E_prop
+                if self.stretch_constraint(p_sa).sum().item() == 0.0 and self.outside_constraint(p_sa)[0].sum().item() == 0.0 and len(self.find_intersections(p_sa))==0:
+                  print("success!")
+                  print(p)
+                  print({"vertices" : [[int(t[0].item()), int(t[1].item())] for t in p]})
+                  success = True
+                  dislike  = self.dislikes(self.holepts, p_sa)
+                  if dislike < min_dislike:
+                    min_dislike = dislike
+                    best_ps = p_sa.data.clone()
+            if epoch % 100 == 0:
+              print (f'epoch: {epoch}, E: {E}, accepted: {accepted}, total: {total}')
+              print ({"round stretch": self.stretch_constraint(p_sa).sum().item(),
+          "round outside": self.outside_constraint(p_sa)[0].sum().item(),
+          "intersections": len(self.find_intersections(p_sa)),
+          "dislike": self.dislikes(self.holepts, p_sa)})
+
+          print (min_dislike)
+          print (best_ps)
+          best_parameters = best_ps
         if best_parameters is not None:
           plt.clf()
           draw(self.poly)
@@ -246,10 +321,7 @@ class Problem:
 for problem_number in range(1, 2):
     problem = Problem(problem_number)
     # result = problem.solve(torch.rand(*problem.original.shape), debug = True)
-    result = problem.solve(problem.original, debug = True)
+    result = problem.solve(problem.original, debug = True, mcmc=True)
     if result is not None:
         with open("p%d.sol.json"%problem_number, "w") as w:
             w.write(json.dumps(result))
-
-    
-
