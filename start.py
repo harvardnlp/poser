@@ -52,7 +52,13 @@ class Params:
 class Problem:
     def __init__(self, problem_number):
         self.problem_number = problem_number
-        poses = json.load(open("p%d.json"%problem_number))
+
+
+        filename = "p%d.json"%problem_number
+        if not os.path.exists(filename):
+            os.system(f"wget https://poses.live/problems/{problem_number}/download -O p{problem_number}.json")
+        poses = json.load(open(filename))
+
         self.epsilon = poses["epsilon"]
         self.figure = poses["figure"]
         self.graph = np.array(self.figure["edges"])
@@ -423,9 +429,9 @@ class Problem:
           plt.savefig("output%d.sol.%d.png"%(self.problem_number, epochs))
           return {"vertices" : [[int(t[0].item()), int(t[1].item())] for t in best_parameters]}
         return None
-SUBMIT = True
+SUBMIT = False
 #for problem_number in range(2, 3):
-for problem_number in [17]:
+for problem_number in [15]:
     problem = Problem(problem_number)
     # result = problem.solve(torch.rand(*problem.original.shape), debug = True)
     result = problem.solve(problem.original, debug = True, mcmc=True)
