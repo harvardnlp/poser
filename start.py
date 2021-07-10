@@ -219,7 +219,7 @@ class Problem:
         best_parameters = None
         best_dislike = float('inf')
 
-        total_epochs = 4000
+        total_epochs = 8000
         for epochs in range(total_epochs):
             parameters = parameter_struct.get_parameters()
 
@@ -314,12 +314,49 @@ class Problem:
 
           def proposal(p, state):
             p = p.data.clone()
+
             state = state % p.shape[0]
-            new_pos_delta_possible = [[-1, 0], [1, 0], [0, -1], [0, 1], [1, 1], [1, -1], [-1, 1], [-1, -1]]
-            new_pos_delta = random.choice(new_pos_delta_possible)
-            p[state, 0] += new_pos_delta[0]
-            p[state, 1] += new_pos_delta[1]
-            return p, state+1
+
+            action = random.choices(
+                ["vertex_translate", "global_translate", "global_rotate"],
+                weights = [8, 1, 1],
+            )[0]
+
+            if action == "vertex_translate":
+                # perturb one vertex
+                new_pos_delta_possible = [[-1, 0], [1, 0], [0, -1], [0, 1], [1, 1], [1, -1], [-1, 1], [-1, -1]]
+                new_pos_delta = random.choice(new_pos_delta_possible)
+
+                p[state, 0] += new_pos_delta[0]
+                p[state, 1] += new_pos_delta[1]
+
+                state = state + 1
+
+            elif action == "global_translate":
+                # perturb global
+                new_pos_delta_possible = [[-1, 0], [1, 0], [0, -1], [0, 1], [1, 1], [1, -1], [-1, 1], [-1, -1]]
+                new_pos_delta = random.choice(new_pos_delta_possible)
+
+                p[:, 0] += new_pos_delta[0]
+                p[:, 1] += new_pos_delta[1]
+
+            elif action == "global_rotate":
+                # rotate global
+                angle = random.choice([45, 90, 135, 180, 225, 270, 315])
+                s = math.sin(angle)
+                c = math.cos(angle)
+
+                # rotate every point angle degrees around center
+                center = p[state]
+
+                p_centered = p - center
+                p[:,0] = c * p_centered[:,0] - s * p_centered[:,0] + center[0] 
+                p[:,1] = c * p_centered[:,1] + s * p_centered[:,1] + center[1]
+                p = p.round()
+            else:
+                raise ValueError(f"Wrong action {action}")
+
+            return p, state
 
           def energy(p):
             stretch = self.stretch_constraint(p).sum().item()
@@ -386,8 +423,9 @@ class Problem:
           plt.savefig("output%d.sol.%d.png"%(self.problem_number, epochs))
           return {"vertices" : [[int(t[0].item()), int(t[1].item())] for t in best_parameters]}
         return None
-SUBMIT = False
-for problem_number in range(2, 3):
+SUBMIT = True
+#for problem_number in range(2, 3):
+for problem_number in [17]:
     problem = Problem(problem_number)
     # result = problem.solve(torch.rand(*problem.original.shape), debug = True)
     result = problem.solve(problem.original, debug = True, mcmc=True)
