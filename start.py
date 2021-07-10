@@ -6,6 +6,7 @@ import json
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
+import os
 # __st.set_option('deprecation.showPyplotGlobalUse', False)
 from polygons import *
 import polygons
@@ -284,7 +285,8 @@ class Problem:
             #if epochs < 5000:
             # print(inside_cons.mean(), outside_cons.mean(), random_cons.mean())
             # loss = 1.0 * outside_cons.sum()  -0.05 * inside_cons.sum()
-            loss = -0.05 * inside_cons.sum()  + 1.0 * outside_cons.sum() +  spring_cons  + st_cons + random_cons.sum()
+            dislike = self.dislikes(self.holepts, parameters)
+            loss = dislike + -0.05 * inside_cons.sum()  + 1.0 * outside_cons.sum() +  spring_cons  + st_cons + random_cons.sum()
             # if random_cons.shape[0] > 0: 
             #     loss +=  random_cons.sum()
             # else:
@@ -297,7 +299,7 @@ class Problem:
             # regenerate after taking a step
             parameters = parameter_struct.get_parameters()
 
-            if False:
+            if True:
                 # opt.lr = rate * 0.5
                 decay = 0.02
                 roundies = (parameters.data - parameters.data.round()).abs() <= decay
@@ -313,7 +315,7 @@ class Problem:
             if self.stretch_constraint(p).sum().item() == 0.0 and self.outside_constraint(p)[0].sum().item() == 0.0 and out_points.sum() == 0:
                 _, intersections, _ = self.random_constraint(p)
                 if len(intersections) == 0:
-                    print("success!")
+                    # print("success!")
                     #print({"vertices" : [[int(t[0].item()), int(t[1].item())] for t in p]})
                     success = True
 
@@ -327,6 +329,7 @@ class Problem:
                 p = parameters.round()        
                 d = {"round" : epochs,
                      "best_dislike": best_dislike,
+                     "dislike":dislike,
                      "loss": loss.detach().item(),
                      "spring" : spring_cons.detach().item(),
                      "intersections" : intersections,
@@ -430,11 +433,11 @@ class Problem:
                 # state_cache = energy_state(p)
                 # print("dyn", state_cache)
                 # print("reg", energy_state(p))
-                # E2 = state_cache["stretch"].sum().item() * 10 + state_cache["outside"].sum().item() * 10 + state_cache["dislike"]/100 + len(state_cache["intersections"]) * 100
-                # # print("E1", E, state_cache["dislike"], len(state_cache["intersections"]))
-                # state_cache = energy_state(p)
-                # E = state_cache["stretch"].sum().item() * 10 + state_cache["outside"].sum().item() * 10 + state_cache["dislike"]/100 + len(state_cache["intersections"]) * 100
-                # assert E == E2
+                E2 = state_cache["stretch"].sum().item() * 10 + state_cache["outside"].sum().item() * 10 + state_cache["dislike"]/100 + len(state_cache["intersections"]) * 100
+                # print("E1", E, state_cache["dislike"], len(state_cache["intersections"]))
+                state_cache = energy_state(p)
+                E = state_cache["stretch"].sum().item() * 10 + state_cache["outside"].sum().item() * 10 + state_cache["dislike"]/100 + len(state_cache["intersections"]) * 100
+                assert E == E2
             # print(state_cache["stretch"].sum().item() * 10, state_cache["outside"].sum().item() * 10, + state_cache["dislike"]/100,  len(state_cache["intersections"]) * 100)
             E = state_cache["stretch"].sum().item() * 10 + state_cache["outside"].sum().item() * 10 + state_cache["dislike"]/100 + len(state_cache["intersections"]) * 100
             # print("E2", E, state_cache["dislike"], len(state_cache["intersections"]))
@@ -505,7 +508,7 @@ class Problem:
           return {"vertices" : [[int(t[0].item()), int(t[1].item())] for t in best_parameters]}
         return None
 SUBMIT = False
-for problem_number in range(5, 6):
+for problem_number in range(3, 4):
     problem = Problem(problem_number)
     # result = problem.solve(torch.rand(*problem.original.shape), debug = True)
     result = problem.solve(problem.original, debug = True, mcmc=True)
