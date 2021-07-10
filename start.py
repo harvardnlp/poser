@@ -141,15 +141,26 @@ class Problem:
         constraint = constraint * constraint
         return constraint.min(-1)[0].sum()
 
-    def solve(self, starting_params, debug=False):
+    
+    def dislikes(self, holes, pts):
+      pts = pts.view(-1, 1, 2)
+      holes = holes.view(1, -1, 2)
+      d = dist(pts, holes).min(0).values
+      return d.sum().item()
+
+    def solve(self, starting_params, debug=False, mcmc=False):
         parameters = starting_params.clone()
         parameters.requires_grad_(True)
 
         rate = 0.3
         opt = torch.optim.SGD([parameters], lr=rate)
         success = False
+        best_parameters = None
+        best_dislike = float('inf')
 
         for epochs in range(40000):
+            #if best_parameters is not None and epochs >= 8000:
+            #  break
             if debug and ((epochs % 1000) == 0 or epochs == 999 or success):
                 plt.clf()
                 draw(self.poly)
@@ -160,7 +171,7 @@ class Problem:
                     draw(segment)
                 plt.savefig("output%d.%d.png"%(self.problem_number, epochs))
                 # __st.pyplot()
-                if success == True:
+                if success == True and False:
                     plt.savefig("output%d.sol.%d.png"%(self.problem_number, epochs))
                     return {"vertices" : [[int(t[0].item()), int(t[1].item())] for t in p]}
             success = False
@@ -190,6 +201,7 @@ class Problem:
                 parameters.data[noroundies] -=  decay * torch.sign(parameters.data[noroundies] - parameters.data[noroundies].round())
 
             p = parameters.detach().round().float()
+            
             if self.stretch_constraint(p).sum().item() == 0.0 and self.outside_constraint(p)[0].sum().item() == 0.0 and out_points.sum() == 0:
                 _, intersections, _ = self.random_constraint(p)
                 if len(intersections) == 0:
@@ -197,10 +209,16 @@ class Problem:
                     print({"vertices" : [[int(t[0].item()), int(t[1].item())] for t in p]})
                     success = True
 
+                    dislike = self.dislikes(self.holepts, parameters)
+                    if dislike < best_dislike:
+                      best_dislike = dislike
+                      best_parameters = p.data.clone()
+
             if epochs % 100 == 0.0:
 
                 p = parameters.round()        
                 d = {"round" : epochs,
+                     "best_dislike": best_dislike,
                      "loss": loss.detach().item(),
                      "spring" : spring_cons.detach().item(),
                      "intersections" : intersections,
@@ -213,9 +231,19 @@ class Problem:
                      # "int con" : int_cons.detach().item()
                 }
                 print(d)
+        if best_parameters is not None:
+          plt.clf()
+          draw(self.poly)
+          vertices = [sg.Point2(a[0], a[1]) for a in best_parameters.detach().numpy()]
+          edge_segments = [sg.Segment2(vertices[fro], vertices[to])
+                            for (fro, to) in self.graph]
+          for segment in edge_segments:
+              draw(segment)
+          plt.savefig("output%d.sol.%d.png"%(self.problem_number, epochs))
+          return {"vertices" : [[int(t[0].item()), int(t[1].item())] for t in best_parameters]}
         return None
 
-for problem_number in range(3, 4):
+for problem_number in range(1, 2):
     problem = Problem(problem_number)
     # result = problem.solve(torch.rand(*problem.original.shape), debug = True)
     result = problem.solve(problem.original, debug = True)
@@ -224,3 +252,4 @@ for problem_number in range(3, 4):
             w.write(json.dumps(result))
 
     
+
