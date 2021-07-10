@@ -70,7 +70,7 @@ import torch
 #     return (num / denom.float())[..., None] * db + b1
 
 def ccw(A,B,C):
-    return (C[...,1] - A[...,1]) * (B[...,0]-A[...,0]) > (B[...,1]-A[...,1]) * (C[...,0]-A[...,0])
+    return (C[...,1] - A[...,1]) * (B[...,0]-A[...,0]) >= (B[...,1]-A[...,1]) * (C[...,0]-A[...,0])
 
 # Return true if line segments AB and CD intersect
 def seg_intersect(A,B,C,D):
@@ -81,10 +81,11 @@ def seg_intersect(A,B,C,D):
     
     return (ccw(A,C,D) != ccw(B,C,D)) & (ccw(A,B,C) != ccw(A,B,D))
 
-p1 = torch.tensor( [[0.0, -4.0], [1.0, 4.0]] )
-p2 = torch.tensor( [[0.0, 5.0], [1.0, 4.0]] )
+# p1, p2, p3, p4 = torch.tensor([[50., 95.]]), torch.tensor([[60., 80.]]), torch.tensor([[70., 90.]]), torch.tensor([[50., 95.]])
+p1 = torch.tensor([[0.0, -4.0], [1.0, 4.0]] )
+p2 = torch.tensor([[0.0, 5.0], [1.0, 4.0]] )
 
-p3 = torch.tensor( [[-1.0, 1.6], [1.0, 3.0]] )
-p4 = torch.tensor( [[2.0, 1.6], [1.0, 5.0]] )
+p3 = torch.tensor([[0.0, 1.6], [1.0, 3.0]] )
+p4 = torch.tensor([[2.0, 1.6], [1.0, 5.0]] )
 
-print(seg_intersect( p1,p2, p3,p4))
+print(seg_intersect(p1,p2, p3,p4))

@@ -42,7 +42,7 @@ class Problem:
         self.target = self.epsilon / 1000000
 
 
-    def find_intersections(self, p):
+    def find_intersections(self, p, debug=False):
         bad_edges = []
         s = self.holepts.shape[0]
         inpoly = parallelpointinpolygon(p.detach().numpy(), self.poly_np)
@@ -53,15 +53,21 @@ class Problem:
                          if inpoly[fro] and inpoly[to]]
         # edge_segments = [sg.Segment2(*e) for e in edge_segments]
 
-        a1 = torch.tensor([[v[1][0], v[1][1]] for v in edge_segments])
-        a2 = torch.tensor([[v[2][0], v[2][1]] for v in edge_segments])
-        b1 = torch.tensor(self.holepts[:])
-        b2 = torch.tensor(self.holepts[list(range(1, s)) + [0]])
+        a1 = torch.tensor([[v[1][0], v[1][1]] for v in edge_segments]).float()
+        a2 = torch.tensor([[v[2][0], v[2][1]] for v in edge_segments]).float()
+        b1 = torch.tensor(self.holepts[:]).float()
+        b2 = torch.tensor(self.holepts[list(range(1, s)) + [0]]).float()
 
         n = seg_intersect(a1, a2, b1, b2)
 
+        if debug:
+            for i in range(n.shape[0]):
+                for j in range(n.shape[1]):
+                    if n[i, j]:
+                        print("intersect", a1[i], a2[i], b1[j], b2[j])
         bad = n.any(dim=1)
         for i in range(bad.shape[0]):
+            
             if bad[i]:
                 bad_edges.append(edge_segments[i][0])
         # for i, edge_segment in enumerate(edge_segments):
@@ -147,22 +153,36 @@ class Problem:
       d = dist(pts, holes).min(0).values
       return d.sum().item()
 
-    def show(self, params):
+    def show(self, params, save=""):
         plt.clf()
         draw(self.poly)
-        random_cons, intersections, outer = self.random_constraint(parameters)
+        violations = self.stretch_constraint(params) > 0.0
+        # self.find_intersections(params.detach(), debug=True)
+        random_cons, intersections, outer = self.random_constraint(params.detach())
+        outside_cons, _, out_points = self.outside_constraint(params.detach())
+        intersections = set(intersections)
         vertices = [sg.Point2(a[0], a[1]) for a in params.detach().numpy()]
         edge_segments = [sg.Segment2(vertices[fro], vertices[to])
                          for (fro, to) in self.graph]
-        for segment in enumerate(edge_segments):
-            draw(segment)
-        plt.savefig("output%d.%d.png"%(self.problem_number, epochs))
+        for i, segment in enumerate(edge_segments):
+            if i in intersections:
+                draw(segment, color="red")
+            elif violations[i]:
+                draw(segment, color="yellow")
+            else:
+                draw(segment, color="blue")
+        for i, vertex in enumerate(vertices):
+            if out_points[i]:
+                draw(vertex, color="red")
+            else:
+                draw(vertex, color="black")
+        if save:
+            plt.savefig(save)
 
   
     def solve(self, starting_params, debug=False, mcmc=False):
         parameters = starting_params.clone()
         parameters.requires_grad_(True)
-
         rate = 0.3
         opt = torch.optim.SGD([parameters], lr=rate)
         success = False
@@ -173,9 +193,12 @@ class Problem:
         for epochs in range(total_epochs):
             #if best_parameters is not None and epochs >= 8000:
             #  break
-            if debug and ((epochs % 1000) == 0 or epochs == 999 or success):
-                self.show(parameters.detach().numpy(),
+            if debug and ((epochs % 500) == 0 or epochs == 999):
+                self.show(parameters,
                           save="output%d.%d.png"%(self.problem_number, epochs))
+                self.show(parameters.round(),
+                          save="output%d.%d.int.png"%(self.problem_number, epochs))
+
                 # __st.pyplot()
                 if success == True and False:
                     plt.savefig("output%d.sol.%d.png"%(self.problem_number, epochs))
@@ -212,7 +235,7 @@ class Problem:
                 _, intersections, _ = self.random_constraint(p)
                 if len(intersections) == 0:
                     print("success!")
-                    print({"vertices" : [[int(t[0].item()), int(t[1].item())] for t in p]})
+                    #print({"vertices" : [[int(t[0].item()), int(t[1].item())] for t in p]})
                     success = True
 
                     dislike = self.dislikes(self.holepts, parameters)
@@ -323,11 +346,26 @@ class Problem:
           plt.savefig("output%d.sol.%d.png"%(self.problem_number, epochs))
           return {"vertices" : [[int(t[0].item()), int(t[1].item())] for t in best_parameters]}
         return None
-
-for problem_number in range(1, 2):
+SUBMIT = False
+for problem_number in range(2, 3):
     problem = Problem(problem_number)
     # result = problem.solve(torch.rand(*problem.original.shape), debug = True)
     result = problem.solve(problem.original, debug = True, mcmc=True)
     if result is not None:
         with open("p%d.sol.json"%problem_number, "w") as w:
             w.write(json.dumps(result))
+        if SUBMIT:
+            import requests
+            # api-endpoint
+            URL = f"https://poses.live/api/problems/{problem_number}/solutions"
+
+            # defining a params dict for the parameters to be sent to the API
+            PARAMS = {'Authorization': 'Bearer eb72d58e-adcf-4d47-9853-6c4680de6ffe'}
+            
+            # sending get request and saving the response as response object
+            r = requests.post(url = URL, json=result, headers = PARAMS)
+            print (r)
+            # extracting data in json format
+            data = r.json()
+              
+            print (data)
