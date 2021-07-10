@@ -9,18 +9,21 @@ import torch
 # __st.set_option('deprecation.showPyplotGlobalUse', False)
 from polygons import *
 import polygons
+import math
+import random
+import time
+from matplotlib.path import Path
+
 def dist(u, v):
     d = u - v
     return (d * d).sum(-1)
 
 def euclidean_projection(p, v, w):
     p = p.view(-1, 1, 2)
-    v = v.view(-1, 2)
-    w = w.view(-1, 2)
     l2 = dist(v, w)
     t = torch.clamp(torch.einsum("psd,sd->ps", p - v, w - v) / l2, max=1, min=0)
     projection = v + t[..., None] * (w - v)
-    d = torch.linalg.norm(p-projection)
+    d = torch.linalg.norm((p-projection), dim=-1)
     return d
 
 class Params:
@@ -66,42 +69,70 @@ class Problem:
         self.npts = self.original.shape[0]
         self.graph = torch.tensor(self.graph)
         self.target = self.epsilon / 1000000
+        self.comp = self.seg_dist(self.original)
+        s = self.holepts.shape[0]
+        self.v = self.holepts[:].view(-1, 2)
+        self.w = self.holepts[list(range(1, s)) + [0]].view(-1, 2)
+        self.b1 = torch.tensor(self.holepts[:]).float()
+        self.b2 = torch.tensor(self.holepts[list(range(1, s)) + [0]]).float()
+        self.poly_path = Path(self.poly_np)
 
-
-    def find_intersections(self, p, debug=False):
+        self.edges = {}
+        for i in range(len(self.vertices)):
+            self.edges[i] = set([j for j, (fro, to) in enumerate(self.graph)
+                                 if to == i or fro == i])
+        
+    def find_intersections(self, p, inpoly=None, debug=False):
+        if inpoly is None:
+            inpoly = parallelpointinpolygon(p.detach().numpy(), self.poly_path)
         bad_edges = []
         s = self.holepts.shape[0]
-        inpoly = parallelpointinpolygon(p.detach().numpy(), self.poly_np)
-        # vertices = [sg.Point2(a[0], a[1]) for a in p.detach().numpy()]
         p = p.detach()
         edge_segments = [(i, p[fro], p[to])
                          for i, (fro, to) in enumerate(self.graph)
                          if inpoly[fro] and inpoly[to]]
-        # edge_segments = [sg.Segment2(*e) for e in edge_segments]
 
         a1 = torch.tensor([[v[1][0], v[1][1]] for v in edge_segments]).float()
         a2 = torch.tensor([[v[2][0], v[2][1]] for v in edge_segments]).float()
-        b1 = torch.tensor(self.holepts[:]).float()
-        b2 = torch.tensor(self.holepts[list(range(1, s)) + [0]]).float()
+        n = seg_intersect(a1, a2, self.b1, self.b2)
 
-        n = seg_intersect(a1, a2, b1, b2)
-
-        if debug:
-            for i in range(n.shape[0]):
-                for j in range(n.shape[1]):
-                    if n[i, j]:
-                        print("intersect", a1[i], a2[i], b1[j], b2[j])
+        # if debug:
+        #     for i in range(n.shape[0]):
+        #         for j in range(n.shape[1]):
+        #             if n[i, j]:
+        #                 print("intersect", a1[i], a2[i], b1[j], b2[j])
         bad = n.any(dim=1)
         for i in range(bad.shape[0]):
-            
             if bad[i]:
                 bad_edges.append(edge_segments[i][0])
-        # for i, edge_segment in enumerate(edge_segments):
-        #     for edge in self.poly.edges:
-        #         if sg.intersection(edge, edge_segment):
-        #             bad_edges.append(i)
-        #             break
         return bad_edges
+
+    def find_intersections_dyn(self, p, inpoly=None, changedpt=None, debug=False):
+        if inpoly is None:
+            inpoly = parallelpointinpolygon(p.detach().numpy(), self.poly_path)
+        bad_edges = []
+        s = self.holepts.shape[0]
+        p = p.detach()
+        total = self.edges[changedpt]
+        edge_segments = [(i, p[fro], p[to])
+                         for i in self.edges[changedpt]
+                         for (fro, to) in [self.graph[i]]
+                         if inpoly[fro] and inpoly[to]]
+
+        a1 = torch.tensor([[v[1][0], v[1][1]] for v in edge_segments]).float()
+        a2 = torch.tensor([[v[2][0], v[2][1]] for v in edge_segments]).float()
+        n = seg_intersect(a1, a2, self.b1, self.b2)
+
+        # if debug:
+        #     for i in range(n.shape[0]):
+        #         for j in range(n.shape[1]):
+        #             if n[i, j]:
+        #                 print("intersect", a1[i], a2[i], b1[j], b2[j])
+        bad = n.any(dim=1)
+        for i in range(bad.shape[0]):
+            if bad[i]:
+                bad_edges.append(edge_segments[i][0])
+        return bad_edges, total
 
     def seg_dist(self, p):
         constraint = p[self.graph[:, 0]] - p[self.graph[:, 1]]
@@ -110,31 +141,30 @@ class Problem:
     # The main constraint
 
     def stretch_constraint(self, p):
-        return torch.relu(((self.seg_dist(p) / self.seg_dist(self.original)) - 1.0).abs() - self.target)
+        return torch.relu(((self.seg_dist(p) / self.comp) - 1.0).abs() - self.target)
 
     def spring_constraint(self, p):
         d = (self.seg_dist(p) - self.seg_dist(self.original))
         return d.abs()
 
-    def outside_constraint(self, points):
-        # outer2 = [i for i, p in enumerate(points)
-        #          if self.poly.oriented_side(sg.Point2(p[0], p[1])) == sg.Sign.NEGATIVE]
-        inpoly = parallelpointinpolygon(points.detach().numpy(), self.poly_np)
-        # outer2 = outer2
-        # for i in range(outer.shape[0]):
-        #     assert (~outer)[i] == (i in outer2) , "%s"%((points[i], self.poly, outer[i]),)
-        p = points[~inpoly]
-        s = self.holepts.shape[0]
-        v = self.holepts[:]
-        w = self.holepts[list(range(1, s)) + [0]]
-        d = euclidean_projection(p, v, w).min(-1)[0]
-        # p = points[outer2]
-        # d2 = euclidean_projection(p, v, w).min(-1)[0]
-        # print(d2)
-        return d[d!=0.0], p, ~inpoly
+    def outside_constraint(self, points, inpoly=None):
+        if inpoly is None:
+            inpoly = parallelpointinpolygon(points.detach().numpy(), self.poly_path)
+        p = points
+        d = euclidean_projection(p, self.v, self.w).min(-1)[0]
+        d[inpoly] = 0.0
+        return d, p, ~inpoly
+
+    def outside_constraint_dyn(self, points):
+        inpoly = parallelpointinpolygon(points.detach().numpy(), self.poly_path)
+        p = points
+        d = euclidean_projection(p, self.v, self.w).min(-1)[0]
+        d[inpoly] = 0.0
+        return d, p, ~inpoly
 
     def random_constraint(self, points):
-        intersections = self.find_intersections(points)
+        inpoly = parallelpointinpolygon(points.detach().numpy(), self.poly_path)
+        intersections = self.find_intersections(points, inpoly)
         new_points = []
         r = torch.rand(100, 1, 1)
         points = r * points[self.graph[intersections, 0]]  + (1-r) * points[self.graph[intersections,1]]
@@ -142,7 +172,7 @@ class Problem:
         outer = []
         for i in range(points.shape[1]):
             outer_for_i = []
-            inpoly = parallelpointinpolygon(points[:, i].detach().numpy(), self.poly_np)
+            inpoly = parallelpointinpolygon(points[:, i].detach().numpy(), self.poly_path)
             for r in range(points.shape[0]):
                 if not inpoly[r]:
                     outer_for_i.append(i)
@@ -150,14 +180,10 @@ class Problem:
                         break
             outer += outer_for_i
         p =  points[outer]
-
-        s = self.holepts.shape[0]
-        v = self.holepts[:]
-        w = self.holepts[list(range(1, s)) + [0]]
-        return euclidean_projection(p, v, w).min(-1)[0], intersections, outer
+        return euclidean_projection(p, self.v, self.w).min(-1)[0], intersections, outer
 
     def inside_constraint(self, points):
-        inpoly = parallelpointinpolygon(points.detach().numpy(), self.poly_np)
+        inpoly = parallelpointinpolygon(points.detach().numpy(), self.poly_path)
         # inside = [i for i, p in enumerate(points)
         #          if self.poly.oriented_side(sg.Point2(p[0], p[1])) == sg.Sign.POSITIVE]
         p = points[inpoly]
@@ -179,6 +205,7 @@ class Problem:
       d = dist(pts, holes).min(0).values
       return d.sum().item()
 
+  
     def show(self, params, save=""):
         plt.clf()
         draw(self.poly)
@@ -225,7 +252,7 @@ class Problem:
 
             #if best_parameters is not None and epochs >= 8000:
             #  break
-            if debug and ((epochs % 500) == 0 or epochs == 999):
+            if debug and ((epochs % 1000) == 0 or epochs == 999):
                 self.show(parameters,
                           save="output%d.%d.png"%(self.problem_number, epochs))
                 self.show(parameters.round(),
@@ -302,8 +329,6 @@ class Problem:
                 print(d)
         if mcmc:
           # simulated annealing
-          import math
-          import random
           min_dislike = float('inf')
           best_ps = None
 
@@ -315,38 +340,94 @@ class Problem:
           def proposal(p, state):
             p = p.data.clone()
             state = state % p.shape[0]
-            new_pos_delta_possible = [[-1, 0], [1, 0], [0, -1], [0, 1], [1, 1], [1, -1], [-1, 1], [-1, -1]]
+            new_pos_delta_possible = [[-1, 0], [1, 0], [0, -1], [0, 1],
+                                      [1, 1], [1, -1], [-1, 1], [-1, -1]]
             new_pos_delta = random.choice(new_pos_delta_possible)
             p[state, 0] += new_pos_delta[0]
             p[state, 1] += new_pos_delta[1]
             return p, state+1
 
-          def energy(p):
-            stretch = self.stretch_constraint(p).sum().item()
-            outside = self.outside_constraint(p)[0].sum().item()
-            dislike = self.dislikes(self.holepts, p)
-            intersections = self.find_intersections(p)
-            E = stretch * 10 + outside * 10 + dislike/100 + len(intersections) * 100
-            return E
+          def energy_state(p):              
+              inpoly = parallelpointinpolygon(p.detach().numpy(), self.poly_path)
+              return {"inpoly" : inpoly,
+                      "stretch" : self.stretch_constraint(p),
+                      "outside" : self.outside_constraint(p)[0],
+                      "dislike" : self.dislikes(self.holepts, p),
+                      "intersections" : self.find_intersections(p, inpoly)}
+
+          def update_energy_state(p, p_old, state, cache):
+              d =  {"inpoly" : np.array(cache["inpoly"]),
+                    
+                    "outside" : cache["outside"].clone(),
+                    "dislike" : self.dislikes(self.holepts, p)}
+              # start = time.time()
+              d["stretch"] = self.stretch_constraint(p)
+              # end = time.time()
+              # print("a", end-start)
+              # start = time.time()
+              # d["dislike"] -= self.dislikes(self.holepts, p_old[state:state+1])
+              # d["dislike"] += self.dislikes(self.holepts, p[state:state+1])
+              # end = time.time()
+              # print("b", end-start)
+              # start = time.time()
+              d["inpoly"][state:state+1] = parallelpointinpolygon(p[state:state+1], self.poly_path)
+              new, old = self.find_intersections_dyn(p, d["inpoly"], state)
+              d["intersections"] = set(cache["intersections"]) - set(old) | set(new)
+              # end = time.time()
+              # print("c", end-start)
+              # start = time.time()
+              d["outside"][state:state+1] = self.outside_constraint_dyn(p[state:state+1])[0]
+              # end = time.time()
+              # print("d", end-start)
+              
+              return d
+          
+          def energy(p, p_old=None, cache=None, state=None):
+            # stretch = self.stretch_constraint(p).sum().item()
+            # outside = self.outside_consrtaint(p)[0].sum().item()
+            # dislike = self.dislikes(self.holepts, p)
+            # intersections = self.find_intersections(p)
+          
+            if cache is None:
+                state_cache = energy_state(p)
+            else:
+                state = state % p.shape[0]
+                state_cache = update_energy_state(p, p_old, state, cache)
+                # print("dyn", state_cache)
+                # print("reg", energy_state(p))
+                # E2 = state_cache["stretch"].sum().item() * 10 + state_cache["outside"].sum().item() * 10 + state_cache["dislike"]/100 + len(state_cache["intersections"]) * 100
+                # # print("E1", E, state_cache["dislike"], len(state_cache["intersections"]))
+                # state_cache = energy_state(p)
+                # E = state_cache["stretch"].sum().item() * 10 + state_cache["outside"].sum().item() * 10 + state_cache["dislike"]/100 + len(state_cache["intersections"]) * 100
+                # assert E == E2
+            E = state_cache["stretch"].sum().item() * 10 + state_cache["outside"].sum().item() * 10 + state_cache["dislike"]/100 + len(state_cache["intersections"]) * 100
+            # print("E2", E, state_cache["dislike"], len(state_cache["intersections"]))
+            return E, state_cache
 
           if best_parameters is None:
             best_parameters = p
-          p_sa = best_parameters.data.clone()
-          E = energy(p_sa)
+          p_sa = best_parameters.detach().clone()
+          E, E_cache = energy(p_sa)
           print (E)
           print ({"round stretch": self.stretch_constraint(p_sa).sum().item(),
-          "round outside": self.outside_constraint(p_sa)[0].sum().item(),
-          "intersections": len(self.find_intersections(p_sa)),
-          "dislike": self.dislikes(self.holepts, p_sa)})
+                  "round outside": self.outside_constraint(p_sa)[0].sum().item(),
+                  "intersections": len(self.find_intersections(p_sa)),
+                  "dislike": self.dislikes(self.holepts, p_sa)})
           epochs = 8000
           state = 0
           accepted = 0
           total = 0
           for epoch in range(epochs):
+            if debug and (epoch % 500) == 0 :
+                print("showing")
+                self.show(best_parameters.detach(),
+                          save="output%d.mcmc.%d.png"%(self.problem_number, epoch))
+                print("done")
+              
             for _ in range(p.shape[0]):
               t = temperature(epoch*p.shape[0], epochs*p.shape[0])
-              p_sa_prop, state = proposal(p_sa, state)
-              E_prop = energy(p_sa_prop)
+              p_sa_prop, state = proposal(p_sa, state)              
+              E_prop, E_cache_prop = energy(p_sa_prop, p_sa, E_cache, state - 1)
               #print ((E - E_prop) / max(t, eps))
               acceptance_ratio = math.exp(min(0, (E - E_prop) / max(t, eps)))
               total += 1
@@ -356,7 +437,8 @@ class Problem:
                 accepted += 1
                 p_sa = p_sa_prop
                 E = E_prop
-                if self.stretch_constraint(p_sa).sum().item() == 0.0 and self.outside_constraint(p_sa)[0].sum().item() == 0.0 and len(self.find_intersections(p_sa))==0:
+                E_cache = E_cache_prop
+                if E_cache["stretch"].sum().item() == 0.0 and E_cache["outside"].sum().item() == 0.0 and len(E_cache["intersections"])==0:
                   print("success!")
                   print(p)
                   print({"vertices" : [[int(t[0].item()), int(t[1].item())] for t in p]})
@@ -366,11 +448,11 @@ class Problem:
                     min_dislike = dislike
                     best_ps = p_sa.data.clone()
             if epoch % 100 == 0:
-              print (f'epoch: {epoch}, E: {E}, accepted: {accepted}, total: {total}')
+              print (f'mcmc epoch: {epoch}, E: {E}, accepted: {accepted}, total: {total}')
               print ({"round stretch": self.stretch_constraint(p_sa).sum().item(),
-          "round outside": self.outside_constraint(p_sa)[0].sum().item(),
-          "intersections": len(self.find_intersections(p_sa)),
-          "dislike": self.dislikes(self.holepts, p_sa)})
+                      "round outside": self.outside_constraint(p_sa)[0].sum().item(),
+                      "intersections": len(self.find_intersections(p_sa)),
+                      "dislike": self.dislikes(self.holepts, p_sa)})
 
           print (min_dislike)
           print (best_ps)
