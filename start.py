@@ -161,7 +161,7 @@ class Problem:
         for epochs in range(total_epochs):
             #if best_parameters is not None and epochs >= 8000:
             #  break
-            if debug and ((epochs % 1000) == 0 or epochs == 999 or success):
+            if debug and ((epochs % 1000) == 0 or epochs == 999 or (success and False)):
                 plt.clf()
                 draw(self.poly)
                 vertices = [sg.Point2(a[0], a[1]) for a in parameters.detach().numpy()]
@@ -206,7 +206,7 @@ class Problem:
                 _, intersections, _ = self.random_constraint(p)
                 if len(intersections) == 0:
                     print("success!")
-                    print({"vertices" : [[int(t[0].item()), int(t[1].item())] for t in p]})
+                    #print({"vertices" : [[int(t[0].item()), int(t[1].item())] for t in p]})
                     success = True
 
                     dislike = self.dislikes(self.holepts, parameters)
@@ -317,11 +317,26 @@ class Problem:
           plt.savefig("output%d.sol.%d.png"%(self.problem_number, epochs))
           return {"vertices" : [[int(t[0].item()), int(t[1].item())] for t in best_parameters]}
         return None
-
-for problem_number in range(1, 2):
+SUBMIT = False
+for problem_number in range(2, 3):
     problem = Problem(problem_number)
     # result = problem.solve(torch.rand(*problem.original.shape), debug = True)
     result = problem.solve(problem.original, debug = True, mcmc=True)
     if result is not None:
         with open("p%d.sol.json"%problem_number, "w") as w:
             w.write(json.dumps(result))
+        if SUBMIT:
+            import requests
+            # api-endpoint
+            URL = f"https://poses.live/api/problems/{problem_number}/solutions"
+
+            # defining a params dict for the parameters to be sent to the API
+            PARAMS = {'Authorization': 'Bearer eb72d58e-adcf-4d47-9853-6c4680de6ffe'}
+            
+            # sending get request and saving the response as response object
+            r = requests.post(url = URL, json=result, headers = PARAMS)
+            print (r)
+            # extracting data in json format
+            data = r.json()
+              
+            print (data)
