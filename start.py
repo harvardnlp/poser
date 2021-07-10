@@ -23,6 +23,32 @@ def euclidean_projection(p, v, w):
     d = torch.linalg.norm(p-projection)
     return d
 
+class Params:
+    def __init__(self, starting_params):
+        self.parameters = starting_params.clone()
+        self.parameters.requires_grad_(True)
+        # x and y bias
+        self.bias = torch.zeros(2)
+        self.bias.requires_grad_(True)
+
+    def get_parameters(self):
+        return self.parameters + self.bias
+
+    def update(self, rate):
+        self.parameters.data -= rate * self.parameters.grad
+        self.bias.data -= rate * self.bias.grad
+
+        # just absorb back into parameters
+        self.parameters.data = self.parameters.data + self.bias.data
+        self.bias.data.zero_()
+
+    def set_parameters(self, parameters):
+        self.parameters.data.copy_(parameters.data)
+        self.bias.data.zero_()
+
+    def raw_parameters(self):
+        return [self.parameters, self.bias]
+
 class Problem:
     def __init__(self, problem_number):
         self.problem_number = problem_number
@@ -148,17 +174,22 @@ class Problem:
       return d.sum().item()
 
     def solve(self, starting_params, debug=False, mcmc=False):
-        parameters = starting_params.clone()
-        parameters.requires_grad_(True)
+        #parameters = starting_params.clone()
+        #parameters.requires_grad_(True)
+        parameter_struct = Params(starting_params)
 
         rate = 0.3
-        opt = torch.optim.SGD([parameters], lr=rate)
+        #opt = torch.optim.SGD([parameters], lr=rate)
+        opt = torch.optim.SGD(parameter_struct.raw_parameters(), lr=rate)
+
         success = False
         best_parameters = None
         best_dislike = float('inf')
 
         total_epochs = 4000
         for epochs in range(total_epochs):
+            parameters = parameter_struct.get_parameters()
+
             #if best_parameters is not None and epochs >= 8000:
             #  break
             if debug and ((epochs % 1000) == 0 or epochs == 999 or (success and False)):
@@ -190,8 +221,13 @@ class Problem:
             # else:
             #     loss =   0.1 * outside_cons.sum() + spring_cons
             loss.backward()
-            delta = (rate * parameters.grad)
-            parameters.data -= delta
+            #delta = (rate * parameters.grad)
+            #parameters.data -= delta
+            parameter_struct.update(rate) # update bias as well for global translation
+
+            # regenerate after taking a step
+            parameters = parameter_struct.get_parameters()
+
             if True:
                 # opt.lr = rate * 0.5
                 decay = 0.02
@@ -199,6 +235,9 @@ class Problem:
                 parameters.data[roundies] =  parameters.data[roundies].round()
                 noroundies = (parameters.data - parameters.data.round()).abs() > decay
                 parameters.data[noroundies] -=  decay * torch.sign(parameters.data[noroundies] - parameters.data[noroundies].round())
+
+            # update parameter_struct with rounded params
+            parameter_struct.set_parameters(parameters)
 
             p = parameters.detach().round().float()
             
