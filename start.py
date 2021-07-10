@@ -147,6 +147,18 @@ class Problem:
       d = dist(pts, holes).min(0).values
       return d.sum().item()
 
+    def show(self, params):
+        plt.clf()
+        draw(self.poly)
+        random_cons, intersections, outer = self.random_constraint(parameters)
+        vertices = [sg.Point2(a[0], a[1]) for a in params.detach().numpy()]
+        edge_segments = [sg.Segment2(vertices[fro], vertices[to])
+                         for (fro, to) in self.graph]
+        for segment in enumerate(edge_segments):
+            draw(segment)
+        plt.savefig("output%d.%d.png"%(self.problem_number, epochs))
+
+  
     def solve(self, starting_params, debug=False, mcmc=False):
         parameters = starting_params.clone()
         parameters.requires_grad_(True)
@@ -162,14 +174,8 @@ class Problem:
             #if best_parameters is not None and epochs >= 8000:
             #  break
             if debug and ((epochs % 1000) == 0 or epochs == 999 or success):
-                plt.clf()
-                draw(self.poly)
-                vertices = [sg.Point2(a[0], a[1]) for a in parameters.detach().numpy()]
-                edge_segments = [sg.Segment2(vertices[fro], vertices[to])
-                                 for (fro, to) in self.graph]
-                for segment in edge_segments:
-                    draw(segment)
-                plt.savefig("output%d.%d.png"%(self.problem_number, epochs))
+                self.show(parameters.detach().numpy(),
+                          save="output%d.%d.png"%(self.problem_number, epochs))
                 # __st.pyplot()
                 if success == True and False:
                     plt.savefig("output%d.sol.%d.png"%(self.problem_number, epochs))
