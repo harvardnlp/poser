@@ -23,7 +23,7 @@ def euclidean_projection(p, v, w):
     l2 = dist(v, w)
     t = torch.clamp(torch.einsum("psd,sd->ps", p - v, w - v) / l2, max=1, min=0)
     projection = v + t[..., None] * (w - v)
-    d = torch.linalg.norm((p-projection), dim=-1)
+    d = torch.linalg.norm((p-projection))
     return d
 
 class Params:
@@ -150,17 +150,17 @@ class Problem:
     def outside_constraint(self, points, inpoly=None):
         if inpoly is None:
             inpoly = parallelpointinpolygon(points.detach().numpy(), self.poly_path)
-        p = points
+
+        p = points[~inpoly]
         d = euclidean_projection(p, self.v, self.w).min(-1)[0]
-        d[inpoly] = 0.0
         return d, p, ~inpoly
 
-    def outside_constraint_dyn(self, points):
-        inpoly = parallelpointinpolygon(points.detach().numpy(), self.poly_path)
-        p = points
-        d = euclidean_projection(p, self.v, self.w).min(-1)[0]
-        d[inpoly] = 0.0
-        return d, p, ~inpoly
+    # def outside_constraint_dyn(self, points):
+    #     inpoly = parallelpointinpolygon(points.detach().numpy(), self.poly_path)
+    #     p = points
+    #     d = euclidean_projection(p, self.v, self.w).min(-1)[0]
+    #     d[inpoly] = 0.0
+    #     return d, p, ~inpoly
 
     def random_constraint(self, points):
         inpoly = parallelpointinpolygon(points.detach().numpy(), self.poly_path)
@@ -184,14 +184,16 @@ class Problem:
 
     def inside_constraint(self, points):
         inpoly = parallelpointinpolygon(points.detach().numpy(), self.poly_path)
-        # inside = [i for i, p in enumerate(points)
-        #          if self.poly.oriented_side(sg.Point2(p[0], p[1])) == sg.Sign.POSITIVE]
         p = points[inpoly]
+        d = euclidean_projection(p, self.v, self.w).min(-1)[0]
+        return d, p, ~inpoly
 
-        s = self.holepts.shape[0]
-        v = self.holepts[:]
-        w = self.holepts[list(range(1, s)) + [0]]
-        return euclidean_projection(p, v, w).min(-1)[0], p, inpoly
+        # d = euclidean_projection(points, self.v, self.w).min(-1)[0]
+        # d[~inpoly] = 0.0
+
+        # # inside = [i for i, p in enumerate(points)
+        # #          if self.poly.oriented_side(sg.Point2(p[0], p[1])) == sg.Sign.POSITIVE]
+        # return d, points, inpoly
 
     def objective(self, p):
         constraint = p.view(self.npts, 1, 2) - self.holepts.view(1, -1, 2)
@@ -274,7 +276,11 @@ class Problem:
             # loss = objective(parameters) + st_cons + outside_cons
 
             #if epochs < 5000:
-            loss = -0.05 * inside_cons.sum()  + 0.1 * outside_cons.sum() +  spring_cons  + st_cons  + random_cons.sum()
+            # print(inside_cons.mean(), outside_cons.mean(), random_cons.mean())
+            loss = 1.0 * outside_cons.sum()  -0.05 * inside_cons.sum()
+            # loss = -0.05 * inside_cons.sum()  + 1.0 * outside_cons.sum() +  spring_cons  + st_cons
+            # if random_cons.shape[0] > 0:
+            #     loss +=  random_cons.sum()
             # else:
             #     loss =   0.1 * outside_cons.sum() + spring_cons
             loss.backward()
@@ -285,7 +291,7 @@ class Problem:
             # regenerate after taking a step
             parameters = parameter_struct.get_parameters()
 
-            if True:
+            if False:
                 # opt.lr = rate * 0.5
                 decay = 0.02
                 roundies = (parameters.data - parameters.data.round()).abs() <= decay
@@ -376,7 +382,7 @@ class Problem:
               # end = time.time()
               # print("c", end-start)
               # start = time.time()
-              d["outside"][state:state+1] = self.outside_constraint_dyn(p[state:state+1])[0]
+              d["outside"] = self.outside_constraint(p, d["inpoly"])[0]
               # end = time.time()
               # print("d", end-start)
               
@@ -471,7 +477,7 @@ class Problem:
           return {"vertices" : [[int(t[0].item()), int(t[1].item())] for t in best_parameters]}
         return None
 SUBMIT = False
-for problem_number in range(2, 3):
+for problem_number in range(1, 2):
     problem = Problem(problem_number)
     # result = problem.solve(torch.rand(*problem.original.shape), debug = True)
     result = problem.solve(problem.original, debug = True, mcmc=True)
