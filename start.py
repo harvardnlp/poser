@@ -277,9 +277,9 @@ class Problem:
 
             #if epochs < 5000:
             # print(inside_cons.mean(), outside_cons.mean(), random_cons.mean())
-            loss = 1.0 * outside_cons.sum()  -0.05 * inside_cons.sum()
-            # loss = -0.05 * inside_cons.sum()  + 1.0 * outside_cons.sum() +  spring_cons  + st_cons
-            # if random_cons.shape[0] > 0:
+            # loss = 1.0 * outside_cons.sum()  -0.05 * inside_cons.sum()
+            loss = -0.05 * inside_cons.sum()  + 1.0 * outside_cons.sum() +  spring_cons  + st_cons + random_cons.sum()
+            # if random_cons.shape[0] > 0: 
             #     loss +=  random_cons.sum()
             # else:
             #     loss =   0.1 * outside_cons.sum() + spring_cons
@@ -399,7 +399,7 @@ class Problem:
             else:
                 state = state % p.shape[0]
                 state_cache = update_energy_state(p, p_old, state, cache)
-                state_cache = energy_state(p)
+                # state_cache = energy_state(p)
                 # print("dyn", state_cache)
                 # print("reg", energy_state(p))
                 # E2 = state_cache["stretch"].sum().item() * 10 + state_cache["outside"].sum().item() * 10 + state_cache["dislike"]/100 + len(state_cache["intersections"]) * 100
@@ -407,7 +407,7 @@ class Problem:
                 # state_cache = energy_state(p)
                 # E = state_cache["stretch"].sum().item() * 10 + state_cache["outside"].sum().item() * 10 + state_cache["dislike"]/100 + len(state_cache["intersections"]) * 100
                 # assert E == E2
-            print(state_cache["stretch"].sum().item() * 10, state_cache["outside"].sum().item() * 10, + state_cache["dislike"]/100,  len(state_cache["intersections"]) * 100)
+            # print(state_cache["stretch"].sum().item() * 10, state_cache["outside"].sum().item() * 10, + state_cache["dislike"]/100,  len(state_cache["intersections"]) * 100)
             E = state_cache["stretch"].sum().item() * 10 + state_cache["outside"].sum().item() * 10 + state_cache["dislike"]/100 + len(state_cache["intersections"]) * 100
             # print("E2", E, state_cache["dislike"], len(state_cache["intersections"]))
             return E, state_cache
@@ -477,7 +477,7 @@ class Problem:
           return {"vertices" : [[int(t[0].item()), int(t[1].item())] for t in best_parameters]}
         return None
 SUBMIT = False
-for problem_number in range(1, 2):
+for problem_number in range(5, 6):
     problem = Problem(problem_number)
     # result = problem.solve(torch.rand(*problem.original.shape), debug = True)
     result = problem.solve(problem.original, debug = True, mcmc=True)

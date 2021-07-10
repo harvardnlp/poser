@@ -33,7 +33,7 @@ print(grid)
 
 # @njit(parallel=True)
 def parallelpointinpolygon(points, polygon):
-    return p.contains_points(points, radius=0.001)
+    return polygon.contains_points(points, radius=0.001)
 
     # D = np.empty(len(points), dtype=numba.boolean) 
     # for i in numba.prange(0, len(D)):
