@@ -14,7 +14,8 @@ import math
 import random
 import time
 from matplotlib.path import Path
-
+import itertools
+        
 def dist(u, v):
     d = u - v
     return (d * d).sum(-1)
@@ -28,19 +29,24 @@ def euclidean_projection(p, v, w):
     return d
 
 class Params:
-    def __init__(self, starting_params):
+    def __init__(self, starting_params, nochange=None):
         self.parameters = starting_params.clone()
         self.parameters.requires_grad_(True)
         # x and y bias
         self.bias = torch.zeros(2)
         self.bias.requires_grad_(True)
-
+        self.nochange = nochange
+        
     def get_parameters(self):
         return self.parameters + self.bias
 
     def update(self, rate):
-        self.parameters.data -= rate * self.parameters.grad
-        self.bias.data -= rate * self.bias.grad
+        if self.nochange is not None:
+            self.parameters.grad[nochange] = 0.0
+            self.parameters.data -= rate * self.parameters.grad
+        else:
+            self.parameters.data -= rate * self.parameters.grad
+            self.bias.data -= rate * self.bias.grad
 
         # just absorb back into parameters
         self.parameters.data = self.parameters.data + self.bias.data
@@ -75,7 +81,7 @@ class Problem:
         self.original = torch.tensor(self.figure["vertices"], dtype=float)
         self.npts = self.original.shape[0]
         self.graph = torch.tensor(self.graph)
-        self.target = self.epsilon / 1000000
+        self.target = float(self.epsilon) / float(1000000.0)
         self.comp = self.seg_dist(self.original)
         s = self.holepts.shape[0]
         self.v = self.holepts[:].view(-1, 2)
@@ -88,7 +94,24 @@ class Problem:
         for i in range(len(self.vertices)):
             self.edges[i] = set([j for j, (fro, to) in enumerate(self.graph)
                                  if to == i or fro == i])
-        
+
+        self.edge_exists = {}
+        graph_set = set([(g[0].item(), g[1].item()) for g in self.graph])
+        print(graph_set)
+        for i in range(len(self.vertices)):
+            for j in range(len(self.vertices)):
+                if (i, j) in graph_set or (j, i) in graph_set:
+                    self.edge_exists[i, j] = dist(self.original[i], self.original[j])
+                    self.edge_exists[j, i] = dist(self.original[i], self.original[j])
+
+        # print(graph_set, self.edge_exists)
+        self.hole_exists = {}
+        for i in range(self.holepts.shape[0]):
+            for j in range(self.holepts.shape[0]):
+                self.hole_exists[i, j] =  dist(self.holepts[i], self.holepts[j])
+                
+
+                
     def find_intersections(self, p, inpoly=None, debug=False):
         if inpoly is None:
             inpoly = parallelpointinpolygon(p.detach().numpy(), self.poly_path)
@@ -240,12 +263,94 @@ class Problem:
                 draw(vertex, color="black")
         if save:
             plt.savefig(save)
+            
+    def guessandcheck(self):
+        import itertools
+        total = len(self.vertices)
+        holes = self.holepts.shape[0]
+        compat = torch.zeros(total, total, holes, holes).bool()
+        for o in range(total):
+            for o2 in range(total):
+                for i in range(holes):
+                    for j in range(holes):
+                        if (o, o2) in self.edge_exists:
+                            compat[o, o2, i, j] = (torch.abs((self.edge_exists[o, o2] / self.hole_exists[i,j]) - 1.0) <= self.target)
 
-  
-    def solve(self, starting_params, debug=False, mcmc=False):
+        for order in itertools.product(range(holes), repeat=total):
+            fail = False
+            for o, i in enumerate(order):
+                for o2, j in enumerate(order[o+1:], o+1):
+                    if (o, o2) in self.edge_exists and not compat[o, o2, i, j]:
+                        fail = True
+                        
+            if fail:
+                continue
+            print("good", order)
+            p = torch.tensor([self.holepts[o].tolist() for o in order])
+            # if self.stretch_constraint(p).sum() < 1.0:
+            #     print(order, self.stretch_constraint(p), self.seg_dist(p), self.comp, target)
+            # if self.stretch_constraint(p).sum().item() == 0.0:
+            
+                # if self.outside_constraint(p)[0].sum().item() == 0.0:
+            _, intersections, _ = self.random_constraint(p)
+            if len(intersections) == 0:
+                return {"vertices" : [[int(t[0].item()), int(t[1].item())] for t in p]}
+            # else:
+            #     print("bad")
+                    
+                #     else:
+                #         print("failed intersection")
+                # else:
+                #     print("failed outside")
+            
+    def guessandcheck2(self, starting_params):
+
+        total = len(self.vertices)
+        holes = self.holepts.shape[0]
+
+        compat = torch.zeros(total, total, holes, holes).bool()
+        compat[:] = True
+        for o in range(total):
+            for o2 in range(o+1, total):
+                for i in range(holes):
+                    for j in range(i+1, holes):
+                        if (o, o2) in self.edge_exists and i != j:
+                            compat[o, o2, i, j] = (torch.abs((self.edge_exists[o, o2] / self.hole_exists[i,j]) - 1.0) <= self.target)
+                            if not compat[o, o2, i, j]:
+                                print(o, o2, i, j)
+        print("hello", list(range(total)), holes)
+        for order in itertools.permutations(list(range(total)), r=holes):
+            fail = False
+            print(order)
+            for i, o in enumerate(order):
+                for j, o2 in enumerate(order[i+1:], i+1):
+                    if not compat[o, o2, i, j]:
+                        fail = True
+                        
+            if not fail:
+                for i, o in enumerate(order):
+                    starting_params[o] = self.holepts[i]
+                nochange = torch.zeros(total).bool()
+                for o in order:
+                    nochange[o] = True
+                yield starting_params, nochange
+            # p = torch.tensor([self.holepts[o].tolist() for o in order])
+            # # if self.stretch_constraint(p).sum() < 1.0:
+            # #     print(order, self.stretch_constraint(p), self.seg_dist(p), self.comp, target)
+            # if self.stretch_constraint(p).sum().item() == 0.0:
+            #     if self.outside_constraint(p)[0].sum().item() == 0.0:
+            #         _, intersections, _ = self.random_constraint(p)
+            #         if len(intersections) == 0:
+            #             return {"vertices" : [[int(t[0].item()), int(t[1].item())] for t in p]}
+        print("done")
+            
+    def solve(self, starting_params, nochange=None, debug=False, mcmc=False, epochs=8000, mcmc_epochs=8000):
+
+        if nochange is not None and nochange.all():
+            return {"vertices" : [[int(t[0].item()), int(t[1].item())] for t in starting_params]}
         #parameters = starting_params.clone()
         #parameters.requires_grad_(True)
-        parameter_struct = Params(starting_params)
+        parameter_struct = Params(starting_params, nochange)
 
         rate = 0.3
         #opt = torch.optim.SGD([parameters], lr=rate)
@@ -255,7 +360,7 @@ class Problem:
         best_parameters = None
         best_dislike = float('inf')
 
-        total_epochs = 8000
+        total_epochs = epochs
         for epochs in range(total_epochs):
             parameters = parameter_struct.get_parameters()
 
@@ -286,7 +391,10 @@ class Problem:
             # print(inside_cons.mean(), outside_cons.mean(), random_cons.mean())
             # loss = 1.0 * outside_cons.sum()  -0.05 * inside_cons.sum()
             dislike = self.dislikes(self.holepts, parameters)
-            loss = dislike + -0.05 * inside_cons.sum()  + 1.0 * outside_cons.sum() +  spring_cons  + st_cons + random_cons.sum()
+            if epochs < 4000:
+                loss = -0.1 * inside_cons.sum()  + 1.0 * outside_cons.sum() +  2*spring_cons  + st_cons + random_cons.sum()
+            else:
+                loss = 1.0 * outside_cons.sum() + spring_cons
             # if random_cons.shape[0] > 0: 
             #     loss +=  random_cons.sum()
             # else:
@@ -294,21 +402,22 @@ class Problem:
             loss.backward()
             #delta = (rate * parameters.grad)
             #parameters.data -= delta
-            parameter_struct.update(rate) # update bias as well for global translation
+            if epochs > 0: 
+                parameter_struct.update(rate) # update bias as well for global translation
 
-            # regenerate after taking a step
-            parameters = parameter_struct.get_parameters()
+                # regenerate after taking a step
+                parameters = parameter_struct.get_parameters()
 
-            if True:
-                # opt.lr = rate * 0.5
-                decay = 0.02
-                roundies = (parameters.data - parameters.data.round()).abs() <= decay
-                parameters.data[roundies] =  parameters.data[roundies].round()
-                noroundies = (parameters.data - parameters.data.round()).abs() > decay
-                parameters.data[noroundies] -=  decay * torch.sign(parameters.data[noroundies] - parameters.data[noroundies].round())
+                if epochs > 4000:
+                    # opt.lr = rate * 0.5
+                    decay = 0.2
+                    roundies = (parameters.data - parameters.data.round()).abs() <= decay
+                    parameters.data[roundies] =  parameters.data[roundies].round()
+                    noroundies = (parameters.data - parameters.data.round()).abs() > decay
+                    parameters.data[noroundies] -=  decay * torch.sign(parameters.data[noroundies] - parameters.data[noroundies].round())
 
-            # update parameter_struct with rounded params
-            parameter_struct.set_parameters(parameters)
+                # update parameter_struct with rounded params
+                parameter_struct.set_parameters(parameters)
 
             p = parameters.detach().round().float()
             
@@ -359,7 +468,7 @@ class Problem:
 
             action = random.choices(
                 ["vertex_translate", "global_translate", "global_rotate"],
-                weights = [8, 1, 1],
+                weights = [10, 0, 0],
             )[0]
 
             if action == "vertex_translate":
@@ -368,8 +477,11 @@ class Problem:
                 new_pos_delta_possible = [[-1, 0], [1, 0], [0, -1], [0, 1], [1, 1], [1, -1], [-1, 1], [-1, -1]]
                 new_pos_delta = random.choice(new_pos_delta_possible)
 
-                p[state, 0] += new_pos_delta[0]
-                p[state, 1] += new_pos_delta[1]
+                if nochange is not None and  nochange[state]:
+                    pass
+                else:
+                    p[state, 0] += new_pos_delta[0]
+                    p[state, 1] += new_pos_delta[1]
 
                 state = state + 1
 
@@ -405,7 +517,7 @@ class Problem:
           def energy_state(p):              
               inpoly = parallelpointinpolygon(p.detach().numpy(), self.poly_path)
               return {"inpoly" : inpoly,
-                      "stretch" : self.stretch_constraint(p),
+                      "stretch" : self.spring_constraint(p),
                       "outside" : self.outside_constraint(p)[0],
                       "dislike" : self.dislikes(self.holepts, p),
                       "intersections" : self.find_intersections(p, inpoly)}
@@ -415,7 +527,7 @@ class Problem:
                     
                     "outside" : cache["outside"].clone(),
                     "dislike" : self.dislikes(self.holepts, p)}
-              d["stretch"] = self.stretch_constraint(p)
+              d["stretch"] = self.spring_constraint(p)
               d["inpoly"][state:state+1] = parallelpointinpolygon(p[state:state+1], self.poly_path)
               new, old = self.find_intersections_dyn(p, d["inpoly"], state)
               d["intersections"] = set(cache["intersections"]) - set(old) | set(new)
@@ -430,17 +542,7 @@ class Problem:
             else:
                 state = state % p.shape[0]
                 state_cache = update_energy_state(p, p_old, state, cache)
-                # state_cache = energy_state(p)
-                # print("dyn", state_cache)
-                # print("reg", energy_state(p))
-                # E2 = state_cache["stretch"].sum().item() * 10 + state_cache["outside"].sum().item() * 10 + state_cache["dislike"]/100 + len(state_cache["intersections"]) * 100
-                # print("E1", E, state_cache["dislike"], len(state_cache["intersections"]))
-                # state_cache = energy_state(p)
-                # E = state_cache["stretch"].sum().item() * 10 + state_cache["outside"].sum().item() * 10 + state_cache["dislike"]/100 + len(state_cache["intersections"]) * 100
-                # assert E == E2
-            # print(state_cache["stretch"].sum().item() * 10, state_cache["outside"].sum().item() * 10, + state_cache["dislike"]/100,  len(state_cache["intersections"]) * 100)
-            E = state_cache["stretch"].sum().item() * 10 + state_cache["outside"].sum().item() * 10 + state_cache["dislike"]/100 + len(state_cache["intersections"]) * 100
-            # print("E2", E, state_cache["dislike"], len(state_cache["intersections"]))
+            E = state_cache["stretch"].sum().item()+ 10 * state_cache["outside"].sum().item() + (state_cache["dislike"]/100000) + len(state_cache["intersections"]) * 100
             return E, state_cache
 
           if best_parameters is None:
@@ -452,7 +554,7 @@ class Problem:
                   "round outside": self.outside_constraint(p_sa)[0].sum().item(),
                   "intersections": len(self.find_intersections(p_sa)),
                   "dislike": self.dislikes(self.holepts, p_sa)})
-          epochs = 8000
+          epochs = mcmc_epochs
           state = 0
           accepted = 0
           total = 0
@@ -478,13 +580,14 @@ class Problem:
                 E = E_prop
                 E_cache = E_cache_prop
                 if E_cache["stretch"].sum().item() == 0.0 and E_cache["outside"].sum().item() == 0.0 and len(E_cache["intersections"])==0:
-                  print("success!")
-                  print(p)
-                  print({"vertices" : [[int(t[0].item()), int(t[1].item())] for t in p]})
+                  # print("success!")
+                  # print(p)
+                  # print({"vertices" : [[int(t[0].item()), int(t[1].item())] for t in p]})
                   success = True
                   dislike  = self.dislikes(self.holepts, p_sa)
                   if dislike < min_dislike:
                     min_dislike = dislike
+                    print("Dislike down to ", min_dislike)
                     best_ps = p_sa.data.clone()
             if epoch % 100 == 0:
               print (f'mcmc epoch: {epoch}, E: {E}, accepted: {accepted}, total: {total}')
@@ -507,14 +610,29 @@ class Problem:
           plt.savefig("output%d.sol.%d.png"%(self.problem_number, epochs))
           return {"vertices" : [[int(t[0].item()), int(t[1].item())] for t in best_parameters]}
         return None
-SUBMIT = False
-for problem_number in range(3, 4):
+SUBMIT = True
+for problem_number in range(31, 32):
     problem = Problem(problem_number)
-    # result = problem.solve(torch.rand(*problem.original.shape), debug = True)
-    result = problem.solve(problem.original, debug = True, mcmc=True)
+    # result = problem.solve(torch.rand(*problem.original.shape), debug = True, mcmc=True)
+    # result = problem.solve(problem.original, debug = False, mcmc=True)
+
+    if True:
+        result = problem.solve(problem.original, debug = False, mcmc=True)
+    elif False:
+        result = problem.guessandcheck()
+    else:
+        result = None
+        for start, nochange in problem.guessandcheck2(torch.rand(*problem.original.shape)):
+            print(nochange)
+            result = problem.solve(start, debug = False, mcmc=True, mcmc_epochs=1000, epochs=2000, nochange=nochange)
+            if result is not None:
+                break
     if result is not None:
         with open("p%d.sol.json"%problem_number, "w") as w:
             w.write(json.dumps(result))
+        # with open("p%d.sol.json"%problem_number, "r") as r:
+        #     result = json.loads(r.read())
+
         if SUBMIT:
             import requests
             # api-endpoint
