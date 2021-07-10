@@ -469,7 +469,7 @@ class Problem:
           return {"vertices" : [[int(t[0].item()), int(t[1].item())] for t in best_parameters]}
         return None
 SUBMIT = False
-for problem_number in range(2, 3):
+for problem_number in range(5, 6):
     problem = Problem(problem_number)
     # result = problem.solve(torch.rand(*problem.original.shape), debug = True)
     result = problem.solve(problem.original, debug = True, mcmc=True)
