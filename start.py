@@ -433,11 +433,11 @@ class Problem:
                 # state_cache = energy_state(p)
                 # print("dyn", state_cache)
                 # print("reg", energy_state(p))
-                E2 = state_cache["stretch"].sum().item() * 10 + state_cache["outside"].sum().item() * 10 + state_cache["dislike"]/100 + len(state_cache["intersections"]) * 100
+                # E2 = state_cache["stretch"].sum().item() * 10 + state_cache["outside"].sum().item() * 10 + state_cache["dislike"]/100 + len(state_cache["intersections"]) * 100
                 # print("E1", E, state_cache["dislike"], len(state_cache["intersections"]))
-                state_cache = energy_state(p)
-                E = state_cache["stretch"].sum().item() * 10 + state_cache["outside"].sum().item() * 10 + state_cache["dislike"]/100 + len(state_cache["intersections"]) * 100
-                assert E == E2
+                # state_cache = energy_state(p)
+                # E = state_cache["stretch"].sum().item() * 10 + state_cache["outside"].sum().item() * 10 + state_cache["dislike"]/100 + len(state_cache["intersections"]) * 100
+                # assert E == E2
             # print(state_cache["stretch"].sum().item() * 10, state_cache["outside"].sum().item() * 10, + state_cache["dislike"]/100,  len(state_cache["intersections"]) * 100)
             E = state_cache["stretch"].sum().item() * 10 + state_cache["outside"].sum().item() * 10 + state_cache["dislike"]/100 + len(state_cache["intersections"]) * 100
             # print("E2", E, state_cache["dislike"], len(state_cache["intersections"]))
